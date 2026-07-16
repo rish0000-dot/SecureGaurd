@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { gsap } from 'gsap';
+import { useAuth } from '../context/AuthContext';
 import './Navbar.css';
 
 const NAV_LINKS = [
@@ -14,6 +15,8 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const navRef = useRef(null);
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   useEffect(() => {
     gsap.fromTo(navRef.current,
@@ -26,10 +29,15 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  const handleLogout = async () => {
+    await logout();
+    navigate('/');
+  };
+
   return (
     <nav ref={navRef} className={`navbar ${scrolled ? 'scrolled' : ''}`}>
       <div className="navbar-inner container">
-        <a href="#" className="navbar-logo">
+        <a href="/" className="navbar-logo">
           <img src="/logo.png" alt="SecureGuard Logo" className="logo-img" />
           <span>Secure<strong>Guard</strong></span>
         </a>
@@ -43,23 +51,35 @@ export default function Navbar() {
         </ul>
 
         <div className="navbar-actions">
-          <Link to="/login" className="btn-ghost">Log in</Link>
-          <Link 
-            to="/signup" 
-            className="btn-primary"
-            onMouseMove={(e) => {
-              const { currentTarget, clientX, clientY } = e;
-              const { left, top, width, height } = currentTarget.getBoundingClientRect();
-              const x = (clientX - (left + width / 2)) * 0.25;
-              const y = (clientY - (top + height / 2)) * 0.25;
-              currentTarget.style.transform = `translate(${x}px, ${y}px)`;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = `translate(0px, 0px)`;
-            }}
-          >
-            Start Free Trial
-          </Link>
+          {user ? (
+            <>
+              <Link to="/dashboard" className="btn-ghost">
+                <span className="nav-avatar">{user.firstName[0]}{user.lastName[0]}</span>
+                Dashboard
+              </Link>
+              <button className="btn-logout" onClick={handleLogout}>Log out</button>
+            </>
+          ) : (
+            <>
+              <Link to="/login" className="btn-ghost">Log in</Link>
+              <Link
+                to="/signup"
+                className="btn-primary"
+                onMouseMove={(e) => {
+                  const { currentTarget, clientX, clientY } = e;
+                  const { left, top, width, height } = currentTarget.getBoundingClientRect();
+                  const x = (clientX - (left + width / 2)) * 0.25;
+                  const y = (clientY - (top + height / 2)) * 0.25;
+                  currentTarget.style.transform = `translate(${x}px, ${y}px)`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = `translate(0px, 0px)`;
+                }}
+              >
+                Start Free Trial
+              </Link>
+            </>
+          )}
         </div>
 
         <button
@@ -73,3 +93,4 @@ export default function Navbar() {
     </nav>
   );
 }
+

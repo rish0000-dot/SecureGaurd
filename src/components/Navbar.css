@@ -76,11 +76,49 @@
   padding: 0.5rem 1rem;
   border-radius: 8px;
   transition: var(--transition-smooth);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .btn-ghost:hover {
   color: var(--text-main);
   background: var(--glass-bg);
+}
+
+.nav-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  letter-spacing: 0;
+}
+
+.btn-logout {
+  text-decoration: none;
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  white-space: nowrap;
+}
+
+.btn-logout:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.05);
 }
 
 .btn-primary {
