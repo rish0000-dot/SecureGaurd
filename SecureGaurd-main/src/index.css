@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg-deep: #000000;
+  --bg-surface: #09090B;
+  --bg-card: #0C0C0E;
+  --primary: #FFFFFF;
+  --accent-blue: #0055FF;
+  --accent-blue-glow: rgba(0, 85, 255, 0.4);
+  --secondary: #27272A;
+  --accent-green: #10B981;
+  --accent-red: #EF4444;
+  --accent-yellow: #F59E0B;
+  --text-main: #FFFFFF;
+  --text-dim: #A1A1AA;
+  --border-color: #27272A;
+  --glass-bg: rgba(255, 255, 255, 0.02);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  
+  --font-body: 'Inter', sans-serif;
+  --font-heading: 'Inter', sans-serif;
+  
+  --transition-smooth: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  cursor: url('/cursors/Normal.png'), auto;
+}
+
+body {
+  background-color: var(--bg-deep);
+  color: var(--text-main);
+  font-family: var(--font-body);
+  overflow-x: hidden;
+  line-height: 1.6;
+}
+
+a, button, [role="button"] {
+  cursor: url('/cursors/Link.png'), pointer !important;
+}
+
+input, textarea {
+  cursor: url('/cursors/Text.png'), text !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  letter-spacing: -0.04em;
+  font-weight: 700;
+}
+
+button {
+  border: none;
+  background: none;
+  font-family: inherit;
+}
+
+/* Glassmorphism Utilities */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: var(--transition-smooth);
+}
+
+.glass-card:hover {
+  border-color: #3F3F46;
+}
+
+/* Glow Effects */
+.glow-primary {
+  box-shadow: 0 0 20px var(--primary-glow);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, #FFF 0%, var(--primary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Layout Utilities */
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.section-padding {
+  padding: 100px 0;
+}
+
+/* Animations */
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+::selection {
+  background: var(--accent-blue);
+  color: white;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}

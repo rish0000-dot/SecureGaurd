@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pandas
+scikit-learn
+xgboost
+joblib
+schedule
+pydantic
+httpx

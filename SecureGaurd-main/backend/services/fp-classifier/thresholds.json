@@ -1,0 +1,23 @@
+{
+  "default": 0.3603,
+  "per_cwe": {
+    "CWE-22": 0.4103,
+    "CWE-502": 0.4076,
+    "CWE-79": 0.3682,
+    "CWE-798": 0.2,
+    "CWE-89": 0.3986,
+    "CWE-918": 0.4697
+  },
+  "metadata": {
+    "alpha": 0.05,
+    "confidence_level": "95%",
+    "calibration_samples": 2400,
+    "min_group_size": 30,
+    "threshold_range": [
+      0.2,
+      0.7
+    ],
+    "cwe_groups_calibrated": 6,
+    "cwe_groups_defaulted": 0
+  }
+}

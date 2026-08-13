@@ -1,0 +1,98 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                   Int          @id @default(autoincrement())
+  firstName            String
+  lastName             String
+  email                String       @unique
+  password             String
+  refreshToken         String?      // stored hashed
+  passwordResetToken   String?
+  passwordResetExpiry  DateTime?
+  isEmailVerified      Boolean      @default(false)
+  emailVerifyToken     String?
+  githubToken          String?
+  gitlabToken          String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  repositories         Repository[]
+  scans                Scan[]
+}
+
+model Repository {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  name        String
+  fullName    String   // e.g. "username/repo-name"
+  url         String
+  platform    String   @default("github") // github | gitlab | bitbucket | manual
+  language    String?
+  isActive    Boolean  @default(true)
+  riskLevel   String   @default("none") // none | low | medium | high | critical
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scans Scan[]
+
+  @@unique([userId, fullName])
+}
+
+model Scan {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  repositoryId    Int
+  status          String   @default("queued") // queued | running | completed | failed
+  commitSha       String?
+  branch          String   @default("main")
+  totalFiles      Int      @default(0)
+  totalLines      Int      @default(0)
+  criticalCount   Int      @default(0)
+  highCount       Int      @default(0)
+  mediumCount     Int      @default(0)
+  lowCount        Int      @default(0)
+  secretsFound    Int      @default(0)
+  durationMs      Int      @default(0)
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository      Repository      @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  vulnerabilities Vulnerability[]
+}
+
+model Vulnerability {
+  id              Int      @id @default(autoincrement())
+  scanId          Int
+  type            String   // sast | secret | dependency | iac
+  severity        String   // critical | high | medium | low | info
+  title           String
+  description     String?
+  filePath        String
+  lineStart       Int      @default(0)
+  lineEnd         Int      @default(0)
+  codeSnippet     String?
+  ruleId          String?
+  cweId           String?
+  status          String   @default("open") // open | fixed | ignored | false_positive
+  aiFix           String?
+  aiFixApplied    Boolean  @default(false)
+  mlFeatures      Json?
+  userLabel       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+}
+

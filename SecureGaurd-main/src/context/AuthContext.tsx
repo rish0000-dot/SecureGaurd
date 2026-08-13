@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
-const API = 'http://localhost:5000/api/auth';
+const API = '/api/auth';
 
 interface User {
   id: number;
