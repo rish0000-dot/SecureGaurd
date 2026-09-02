@@ -27,13 +27,27 @@ const AuthPage: React.FC<AuthPageProps> = ({ defaultMode }) => {
 
   const location = useLocation();
   const navigate  = useNavigate();
-  const { login, register } = useAuth();
+  const { login, register, user } = useAuth();
 
   useEffect(() => {
     setMode(defaultMode);
     setError('');
     setSuccess('');
   }, [defaultMode, location.pathname]);
+
+  // Redirect after successful login based on onboarding status
+  useEffect(() => {
+    if (user && success.includes('Login successful')) {
+      const timer = setTimeout(() => {
+        if (user.onboardingCompleted) {
+          navigate('/dashboard');
+        } else {
+          navigate('/onboarding');
+        }
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [user, success, navigate]);
 
   // ── Login / Register ────────────────────────────────────────────────────────
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -50,11 +64,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ defaultMode }) => {
     try {
       if (mode === 'login') {
         await login(email, password);
+        setSuccess('Login successful! Redirecting…');
+        // After login, user state is updated — use a small delay then check
+        // Note: we navigate in useEffect below based on updated user state
       } else {
         await register(firstName, lastName, email, password);
+        setSuccess('Account created! Redirecting to setup…');
+        // New users always go to onboarding
+        setTimeout(() => navigate('/onboarding'), 1000);
       }
-      setSuccess(mode === 'login' ? 'Login successful! Redirecting…' : 'Account created! Redirecting…');
-      setTimeout(() => navigate('/dashboard'), 1200);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {

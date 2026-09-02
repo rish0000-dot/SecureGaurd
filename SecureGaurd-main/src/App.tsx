@@ -10,6 +10,7 @@ import CTA from './components/CTA'
 import Footer from './components/Footer'
 import AuthPage from './components/AuthPage'
 import Dashboard from './components/Dashboard'
+import OnboardingWizard from './components/OnboardingWizard'
 
 function Home() {
   return (
@@ -35,6 +36,7 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/signup" element={<AuthPage defaultMode="signup" />} />
         <Route path="/login" element={<AuthPage defaultMode="login" />} />
+        <Route path="/onboarding" element={<OnboardingWizard />} />
         <Route path="/dashboard" element={<Dashboard />} />
       </Routes>
     </Router>

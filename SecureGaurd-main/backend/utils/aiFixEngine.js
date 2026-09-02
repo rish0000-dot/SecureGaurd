@@ -163,7 +163,16 @@ const DEFAULT_FIX = {
 async function generateAiFix(vulnerability) {
   const { title, codeSnippet, type, severity } = vulnerability;
 
-  // Try Gemini API first if key is available
+  // 1. Try local gemini-web2api proxy (1.5M Token Web Model)
+  const web2apiUrl = process.env.GEMINI_WEB2API_URL || 'http://localhost:8081/v1';
+  try {
+    const web2apiResult = await callGeminiWeb2Api(vulnerability, web2apiUrl);
+    if (web2apiResult) return web2apiResult;
+  } catch {
+    // web2api proxy not running, try official API key
+  }
+
+  // 2. Try official Gemini API key if available
   if (process.env.GEMINI_API_KEY) {
     try {
       const geminiResult = await callGeminiAPI(vulnerability);
@@ -173,7 +182,7 @@ async function generateAiFix(vulnerability) {
     }
   }
 
-  // Rule-based engine
+  // 3. Built-in Rule Engine Fallback
   const rule = FIX_RULES[title] || DEFAULT_FIX;
   const fixedCode = rule.fixTemplate(codeSnippet || '');
 
@@ -188,7 +197,65 @@ async function generateAiFix(vulnerability) {
   };
 }
 
-// ── Gemini API Integration ────────────────────────────────────────────────────
+// ── Gemini Web2API Integration (1.5M Token Context Proxy) ────────────────────
+async function callGeminiWeb2Api(vulnerability, baseUrl) {
+  const { title, codeSnippet, filePath, severity } = vulnerability;
+
+  const prompt = `You are a senior application security engineer. Analyze this ${severity.toUpperCase()} severity vulnerability and provide a production-ready fix.
+
+Vulnerability: ${title}
+File: ${filePath}
+Vulnerable Code:
+\`\`\`
+${codeSnippet}
+\`\`\`
+
+Respond in valid JSON only (no markdown codeblock wrapper):
+{
+  "fixedCode": "the complete fixed code snippet",
+  "explanation": "clear 1-2 sentence explanation of why this is vulnerable and what the fix does",
+  "confidence": 95,
+  "cweId": "CWE-XXX"
+}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.GEMINI_WEB2API_KEY || 'sk-gemini'}`
+    },
+    body: JSON.stringify({
+      model: 'gemini-1.5-flash',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1
+    }),
+    signal: controller.signal
+  });
+  clearTimeout(timeoutId);
+
+  if (!res.ok) throw new Error(`web2api error: ${res.status}`);
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || '';
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse web2api JSON response');
+
+  const parsed = JSON.parse(jsonMatch[0]);
+  return {
+    fixedCode: parsed.fixedCode || '',
+    explanation: parsed.explanation || '',
+    confidence: parsed.confidence || 90,
+    cweId: parsed.cweId || 'CWE-20',
+    cvssScore: 7.5,
+    references: [],
+    engine: 'gemini-1.5-flash (web2api proxy - 1.5M Tokens)'
+  };
+}
+
+// ── Official Gemini REST API Integration ──────────────────────────────────────
 async function callGeminiAPI(vulnerability) {
   const { title, codeSnippet, filePath, severity } = vulnerability;
 
@@ -236,7 +303,7 @@ Respond in valid JSON only (no markdown):
     cweId: parsed.cweId || 'CWE-20',
     cvssScore: 7.0,
     references: [],
-    engine: 'gemini-1.5-flash'
+    engine: 'gemini-1.5-flash (official API)'
   };
 }
 

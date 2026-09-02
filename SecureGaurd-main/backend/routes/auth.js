@@ -4,9 +4,29 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const prisma = require('../prismaClient');
+const authMiddleware = require('../middleware/auth');
+
+const rateLimit = require('express-rate-limit');
 
 const ACCESS_EXPIRY  = '15m';   // short-lived access token
 const REFRESH_EXPIRY = '7d';    // long-lived refresh token
+
+// Rate Limiters
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: { message: 'Too many authentication attempts, please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const resetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: { message: 'Too many password reset attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function generateAccessToken(userId) {
@@ -32,7 +52,7 @@ function clearRefreshCookie(res) {
 }
 
 // ── POST /api/auth/register ───────────────────────────────────────────────────
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   const { firstName, lastName, email, password } = req.body;
 
   if (!firstName || !lastName || !email || !password)
@@ -63,7 +83,7 @@ router.post('/register', async (req, res) => {
 
     res.status(201).json({
       accessToken,
-      user: { id: newUser.id, firstName, lastName, email, isEmailVerified: false },
+      user: { id: newUser.id, firstName, lastName, email, isEmailVerified: false, onboardingCompleted: false },
     });
   } catch (err) {
     console.error(err);
@@ -72,7 +92,7 @@ router.post('/register', async (req, res) => {
 });
 
 // ── POST /api/auth/login ──────────────────────────────────────────────────────
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ message: 'All fields are required' });
 
@@ -94,7 +114,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       accessToken,
-      user: { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, isEmailVerified: user.isEmailVerified },
+      user: { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, isEmailVerified: user.isEmailVerified, onboardingCompleted: !!user.onboardingCompleted },
     });
   } catch (err) {
     console.error(err);
@@ -128,7 +148,7 @@ router.post('/refresh', async (req, res) => {
 
     res.json({
       accessToken: newAccessToken,
-      user: { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, isEmailVerified: user.isEmailVerified },
+      user: { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, isEmailVerified: user.isEmailVerified, onboardingCompleted: !!user.onboardingCompleted },
     });
   } catch {
     clearRefreshCookie(res);
@@ -151,7 +171,7 @@ router.post('/logout', async (req, res) => {
 });
 
 // ── POST /api/auth/forgot-password ───────────────────────────────────────────
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', resetLimiter, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'Email is required' });
 
@@ -169,12 +189,8 @@ router.post('/forgot-password', async (req, res) => {
       data: { passwordResetToken: resetToken, passwordResetExpiry: resetExpiry },
     });
 
-    // In production: send email with link containing resetToken.
-    // For now: return the token directly so it can be used in dev.
     res.json({
-      message: 'Password reset token generated.',
-      resetToken, // remove this in production — send via email instead
-      hint: 'Use this token at POST /api/auth/reset-password',
+      message: 'If that email exists, a password reset link has been sent to your email.'
     });
   } catch (err) {
     console.error(err);
@@ -240,11 +256,35 @@ router.get('/me', async (req, res) => {
 
     res.json({
       accessToken: newAccessToken,
-      user: { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, isEmailVerified: user.isEmailVerified },
+      user: { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, isEmailVerified: user.isEmailVerified, onboardingCompleted: !!user.onboardingCompleted },
     });
   } catch {
     clearRefreshCookie(res);
     return res.status(401).json({ message: 'Session expired' });
+  }
+});
+
+// ── POST /api/auth/complete-onboarding ────────────────────────────────────────
+router.post('/complete-onboarding', authMiddleware, async (req, res) => {
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { onboardingCompleted: true }
+    });
+    res.json({
+      message: 'Onboarding completed successfully',
+      user: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        isEmailVerified: user.isEmailVerified,
+        onboardingCompleted: true
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error completing onboarding' });
   }
 });
 

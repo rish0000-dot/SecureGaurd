@@ -96,8 +96,16 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+const rateLimit = require('express-rate-limit');
+
+const scanTriggerLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 5,
+  message: { message: 'Too many scan requests triggered. Please wait before triggering another scan.' },
+});
+
 // POST /api/scans/trigger — trigger a real SAST/Secret scan for a repo
-router.post('/trigger', async (req, res) => {
+router.post('/trigger', scanTriggerLimiter, async (req, res) => {
   const { repositoryId } = req.body;
   if (!repositoryId) return res.status(400).json({ message: 'repositoryId is required' });
 

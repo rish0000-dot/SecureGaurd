@@ -141,10 +141,12 @@ export default function Dashboard() {
   const [isFullDetailOpen, setIsFullDetailOpen] = useState(false);
   const [fullDetailVuln, setFullDetailVuln] = useState<any | null>(null);
 
-  // Guard — redirect if not authenticated
+  // Guard — redirect if not authenticated or onboarding incomplete
   useEffect(() => {
     if (!user) {
       navigate('/login');
+    } else if (user.onboardingCompleted === false) {
+      navigate('/onboarding');
     }
   }, [user, navigate]);
 

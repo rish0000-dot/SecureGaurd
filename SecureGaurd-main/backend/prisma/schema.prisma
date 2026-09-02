@@ -20,6 +20,7 @@ model User {
   passwordResetToken   String?
   passwordResetExpiry  DateTime?
   isEmailVerified      Boolean      @default(false)
+  onboardingCompleted  Boolean      @default(false)
   emailVerifyToken     String?
   githubToken          String?
   gitlabToken          String?

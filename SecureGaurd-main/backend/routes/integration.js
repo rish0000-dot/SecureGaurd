@@ -4,12 +4,43 @@ const prisma = require('../prismaClient');
 const authMiddleware = require('../middleware/auth');
 const { runSecurityScan } = require('../utils/securityScanner');
 const path = require('path');
+const crypto = require('crypto');
+const { encrypt, decrypt } = require('../utils/cryptoUtils');
+const rateLimit = require('express-rate-limit');
+
+const webhookLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 30,
+  message: { message: 'Too many webhook requests' },
+});
+
+// Helper: Verify GitHub/GitLab Webhook Signatures
+function verifyWebhookSignature(platform, req) {
+  const secret = process.env.WEBHOOK_SECRET;
+  if (!secret) return true; // Optional in dev mode if WEBHOOK_SECRET is not configured
+
+  if (platform === 'github') {
+    const signature = req.headers['x-hub-signature-256'];
+    if (!signature) return false;
+    const hmac = crypto.createHmac('sha256', secret);
+    const digest = 'sha256=' + hmac.update(JSON.stringify(req.body)).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+  } else if (platform === 'gitlab') {
+    const token = req.headers['x-gitlab-token'];
+    return token === secret;
+  }
+  return true;
+}
 
 // Webhook endpoint does NOT require auth header since it's called by Github/Gitlab
-router.post('/webhook/:platform', async (req, res) => {
+router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
   const { platform } = req.params;
   const payload = req.body;
   
+  if (!verifyWebhookSignature(platform, req)) {
+    return res.status(401).json({ message: 'Invalid webhook signature or secret token' });
+  }
+
   console.log(`[Webhook Received] Platform: ${platform}`);
   
   try {
@@ -193,13 +224,13 @@ router.get('/tokens', async (req, res) => {
   }
 });
 
-// POST /api/integration/tokens: Save personal access tokens
+// POST /api/integration/tokens: Save personal access tokens (encrypted at rest)
 router.post('/tokens', async (req, res) => {
   const { githubToken, gitlabToken } = req.body;
   try {
     const data = {};
-    if (githubToken !== undefined) data.githubToken = githubToken;
-    if (gitlabToken !== undefined) data.gitlabToken = gitlabToken;
+    if (githubToken !== undefined) data.githubToken = encrypt(githubToken);
+    if (gitlabToken !== undefined) data.gitlabToken = encrypt(gitlabToken);
 
     await prisma.user.update({
       where: { id: req.userId },
@@ -227,7 +258,8 @@ router.get('/repos', async (req, res) => {
 
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const token = platform === 'github' ? user.githubToken : user.gitlabToken;
+    const rawToken = platform === 'github' ? user.githubToken : user.gitlabToken;
+    const token = decrypt(rawToken);
     if (!token) {
       return res.status(200).json([]); // Return empty list if no token is configured
     }

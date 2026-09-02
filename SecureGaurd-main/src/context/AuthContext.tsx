@@ -8,6 +8,7 @@ interface User {
   lastName: string;
   email: string;
   isEmailVerified: boolean;
+  onboardingCompleted?: boolean;
 }
 
 interface AuthContextType {
@@ -18,6 +19,7 @@ interface AuthContextType {
   register: (firstName: string, lastName: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<boolean>;
+  completeOnboarding: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -94,8 +96,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return false;
   }, []);
 
+  const completeOnboarding = async () => {
+    try {
+      const res = await authFetch(`${API}/complete-onboarding`, { method: 'POST' }, accessToken, refreshSession);
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+      } else {
+        if (user) setUser({ ...user, onboardingCompleted: true });
+      }
+    } catch {
+      if (user) setUser({ ...user, onboardingCompleted: true });
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, accessToken, loading, login, register, logout, refreshSession }}>
+    <AuthContext.Provider value={{ user, accessToken, loading, login, register, logout, refreshSession, completeOnboarding }}>
       {children}
     </AuthContext.Provider>
   );
