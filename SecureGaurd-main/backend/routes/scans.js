@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../prismaClient');
 const authMiddleware = require('../middleware/auth');
+const { requireOrgContext, createAuditLog } = require('../middleware/rbac');
+const { checkCanTriggerScan } = require('../services/billingService');
 const path = require('path');
 const { runSecurityScan } = require('../utils/securityScanner');
 
-// GET /api/scans/export-feedback — export all user feedback labels for retraining (bypass auth if valid api key is present)
+// GET /api/scans/export-feedback — export all user feedback labels for retraining
 router.get('/export-feedback', async (req, res, next) => {
   const apiKey = req.headers['x-secureguard-key'];
   if (process.env.CLASSIFIER_API_KEY && apiKey === process.env.CLASSIFIER_API_KEY) {
@@ -58,31 +60,35 @@ router.get('/export-feedback', async (req, res, next) => {
 });
 
 router.use(authMiddleware);
+router.use(requireOrgContext);
 
-// GET /api/scans — list all scans for the logged-in user (with repo info)
+// GET /api/scans — list scans for active organization
 router.get('/', async (req, res) => {
   try {
     const scans = await prisma.scan.findMany({
-      where: { userId: req.userId },
+      where: { organizationId: req.organizationId },
       include: {
         repository: { select: { name: true, fullName: true, platform: true } },
         _count: { select: { vulnerabilities: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: 50,
     });
     res.json(scans);
   } catch (err) {
-    console.error(err);
+    console.error('Error listing scans:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// GET /api/scans/:id — single scan with all its vulnerabilities
+// GET /api/scans/:id — single scan with vulnerabilities
 router.get('/:id', async (req, res) => {
+  const scanId = parseInt(req.params.id);
+  if (isNaN(scanId)) return res.status(400).json({ message: 'Invalid scan ID' });
+
   try {
     const scan = await prisma.scan.findFirst({
-      where: { id: parseInt(req.params.id), userId: req.userId },
+      where: { id: scanId, organizationId: req.organizationId },
       include: {
         repository: true,
         vulnerabilities: { orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }] },
@@ -91,7 +97,7 @@ router.get('/:id', async (req, res) => {
     if (!scan) return res.status(404).json({ message: 'Scan not found' });
     res.json(scan);
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching scan:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -100,32 +106,49 @@ const rateLimit = require('express-rate-limit');
 
 const scanTriggerLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 5,
+  max: 10,
   message: { message: 'Too many scan requests triggered. Please wait before triggering another scan.' },
 });
 
-// POST /api/scans/trigger — trigger a real SAST/Secret scan for a repo
+// POST /api/scans/trigger — trigger a real SAST/Secret scan for an organization repo
 router.post('/trigger', scanTriggerLimiter, async (req, res) => {
   const { repositoryId } = req.body;
-  if (!repositoryId) return res.status(400).json({ message: 'repositoryId is required' });
+  if (!repositoryId || isNaN(parseInt(repositoryId))) return res.status(400).json({ message: 'Valid repositoryId is required' });
 
   try {
-    // Verify the repo belongs to this user
-    const repo = await prisma.repository.findFirst({
-      where: { id: parseInt(repositoryId), userId: req.userId },
-    });
-    if (!repo) return res.status(404).json({ message: 'Repository not found' });
+    // Entitlement Check: Monthly Scan Limit
+    const limitCheck = await checkCanTriggerScan(req.organizationId);
+    if (!limitCheck.allowed) {
+      await createAuditLog(
+        req.organizationId,
+        req.userId,
+        'USAGE_LIMIT_REACHED',
+        'ORGANIZATION',
+        String(req.organizationId),
+        { resource: 'SCAN', limit: limitCheck.usage?.limit }
+      );
+      return res.status(403).json({
+        error: limitCheck.reason,
+        message: limitCheck.message,
+        usage: limitCheck.usage
+      });
+    }
 
-    // Path to scan is the project root folder (one directory up from backend)
+    // Verify repo belongs to active organization
+    const repo = await prisma.repository.findFirst({
+      where: { id: parseInt(repositoryId), organizationId: req.organizationId },
+    });
+    if (!repo) return res.status(404).json({ message: 'Repository not found in active organization' });
+
+    // Path to scan is the project root folder
     const scanPath = path.join(__dirname, '..', '..');
     
     // Execute real security scan
     const scanResult = runSecurityScan(scanPath);
 
-    // Fetch historical tracking metrics from DB to append to ML Features
+    // Append ML Features
     for (let finding of scanResult.findings) {
       if (finding.mlFeatures) {
-        // Count how many times this specific rule + file was seen before
         const seenCount = await prisma.vulnerability.count({
           where: {
             ruleId: finding.ruleId,
@@ -135,7 +158,6 @@ router.post('/trigger', scanTriggerLimiter, async (req, res) => {
         });
         finding.mlFeatures.same_finding_seen_before_count = seenCount;
 
-        // Count how many times a similar finding was dismissed
         const dismissedCount = await prisma.vulnerability.count({
           where: {
             ruleId: finding.ruleId,
@@ -144,9 +166,8 @@ router.post('/trigger', scanTriggerLimiter, async (req, res) => {
           }
         });
         finding.mlFeatures.developer_dismissed_similar_before = dismissedCount;
-        finding.mlFeatures.file_change_frequency = 0; // Fallback limitation
+        finding.mlFeatures.file_change_frequency = 0;
 
-        // Map internal ruleIds to trained classifier categories
         const RULE_MAP = {
           'SAST-001': 'sqli-concat',
           'SAST-002': 'xss-unescaped',
@@ -162,7 +183,7 @@ router.post('/trigger', scanTriggerLimiter, async (req, res) => {
       }
     }
 
-    // Filter Findings via ML Classifier
+    // ML Classifier Batch Query
     let finalFindings = scanResult.findings;
     const sastFindings = scanResult.findings.filter(f => f.mlFeatures);
     
@@ -195,20 +216,17 @@ router.post('/trigger', scanTriggerLimiter, async (req, res) => {
             const data = await response.json();
             results.push(...(data.results || []));
           } else {
-            console.warn(`[ML Service Error] Classifier returned status ${response.status} for chunk. Failing open.`);
             results.push(...Array(chunk.length).fill(null));
           }
         } catch (err) {
           clearTimeout(timeoutId);
-          console.warn(`[ML Service Error] Failed to reach FP classifier for chunk. Error: ${err.message}. Failing open.`);
           results.push(...Array(chunk.length).fill(null));
         }
       }
 
-      // Keep all findings but assign status based on ML prediction
       const processedSastFindings = sastFindings.map((f, idx) => {
         const res = results[idx];
-        const pred = res?.prediction || 'REAL'; // Fail-open to REAL
+        const pred = res?.prediction || 'REAL';
         const explanations = res?.explanations || [];
 
         return {
@@ -223,24 +241,22 @@ router.post('/trigger', scanTriggerLimiter, async (req, res) => {
         };
       });
 
-      // Combine processed SAST findings with non-SAST (e.g. dependency, secrets)
       finalFindings = [
         ...scanResult.findings.filter(f => !f.mlFeatures).map(f => ({ ...f, status: 'open' })),
         ...processedSastFindings
       ];
     }
 
-    // Group findings count by severity (only count active 'open' findings)
     const critCount = finalFindings.filter(f => f.status === 'open' && f.severity === 'critical').length;
     const highCount = finalFindings.filter(f => f.status === 'open' && f.severity === 'high').length;
     const medCount  = finalFindings.filter(f => f.status === 'open' && f.severity === 'medium').length;
     const lowCount  = finalFindings.filter(f => f.status === 'open' && f.severity === 'low').length;
     const secrets   = finalFindings.filter(f => f.status === 'open' && f.type === 'secret').length;
 
-    // Create the scan database entry
     const scan = await prisma.scan.create({
       data: {
         userId: req.userId,
+        organizationId: req.organizationId,
         repositoryId: repo.id,
         status: 'completed',
         branch: 'main',
@@ -256,7 +272,6 @@ router.post('/trigger', scanTriggerLimiter, async (req, res) => {
       },
     });
 
-    // Save final findings as vulnerabilities
     if (finalFindings.length > 0) {
       const dbFindings = finalFindings.map(f => ({
         scanId: scan.id,
@@ -275,26 +290,79 @@ router.post('/trigger', scanTriggerLimiter, async (req, res) => {
       await prisma.vulnerability.createMany({ data: dbFindings });
     }
 
-    // Update repo risk level based on scan results
     const riskLevel = critCount > 0 ? 'critical' : highCount > 2 ? 'high' : medCount > 3 ? 'medium' : 'low';
     await prisma.repository.update({
       where: { id: repo.id },
       data: { riskLevel, updatedAt: new Date() },
     });
 
+    // Generate & Store SPDX 2.3 Software Bill of Materials (SBOM)
+    try {
+      const { generateSpdxDocument } = require('../utils/spdxGenerator');
+      const { validateSpdxDocument } = require('../utils/spdxValidator');
+
+      const { spdxDocument, summaryStats: sbomStats } = generateSpdxDocument({
+        repository: repo,
+        scanId: scan.id,
+        components: scanResult.sbomComponents || [],
+        vulnerabilities: finalFindings
+      });
+
+      const validation = validateSpdxDocument(spdxDocument);
+      if (validation.isValid) {
+        await prisma.sbom.create({
+          data: {
+            organizationId: req.organizationId,
+            repositoryId: repo.id,
+            scanId: scan.id,
+            spdxVersion: 'SPDX-2.3',
+            dataLicense: 'CC0-1.0',
+            documentNamespace: spdxDocument.documentNamespace,
+            name: spdxDocument.name,
+            componentCount: sbomStats.componentCount,
+            directCount: sbomStats.directCount,
+            transitiveCount: sbomStats.transitiveCount,
+            vulnerableCount: sbomStats.vulnerableCount,
+            ecosystems: sbomStats.ecosystems,
+            spdxDoc: spdxDocument
+          }
+        });
+
+        await createAuditLog(
+          req.organizationId,
+          req.userId,
+          'SBOM_GENERATED',
+          'SBOM',
+          String(scan.id),
+          { repoName: repo.name, componentCount: sbomStats.componentCount, vulnerableCount: sbomStats.vulnerableCount }
+        );
+      }
+    } catch (sbomErr) {
+      console.error('Error generating SBOM during scan:', sbomErr);
+    }
+
+    await createAuditLog(
+      req.organizationId,
+      req.userId,
+      'SCAN_COMPLETED',
+      'SCAN',
+      String(scan.id),
+      { repoName: repo.name, findingsCount: finalFindings.length, criticalCount: critCount }
+    );
+
     res.status(201).json({ scan, message: `Scan completed. Evaluated ${scanResult.totalFiles} files. Found ${finalFindings.length} real issues.` });
   } catch (err) {
-    console.error(err);
+    console.error('Error running scan:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// GET /api/scans/stats/summary — dashboard summary stats for this user
+// GET /api/scans/stats/summary — dashboard summary stats for active organization
 router.get('/stats/summary', async (req, res) => {
   try {
     const vulns = await prisma.vulnerability.findMany({
       where: {
-        scan: { userId: req.userId },
+        scan: { organizationId: req.organizationId },
         status: 'open',
       },
       select: { severity: true },
@@ -308,14 +376,14 @@ router.get('/stats/summary', async (req, res) => {
     const health   = Math.max(0, 100 - critical * 15 - high * 8 - medium * 3 - low);
 
     const lastScan = await prisma.scan.findFirst({
-      where: { userId: req.userId, status: 'completed' },
+      where: { organizationId: req.organizationId, status: 'completed' },
       orderBy: { createdAt: 'desc' },
       select: { durationMs: true, totalFiles: true, createdAt: true },
     });
 
     res.json({ critical, high, medium, low, total, health, lastScan });
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching summary stats:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

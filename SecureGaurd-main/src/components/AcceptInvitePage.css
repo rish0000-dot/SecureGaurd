@@ -1,0 +1,90 @@
+.invite-page-container {
+  min-height: 100vh;
+  background: radial-gradient(circle at top center, #1e1b4b 0%, #090d16 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.invite-card {
+  width: 440px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 36px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+
+.org-invite-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #fff;
+  font-size: 28px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px auto;
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+}
+
+.invite-card h2 {
+  margin: 0 0 10px 0;
+  font-size: 24px;
+}
+
+.invite-subtitle {
+  color: #94a3b8;
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+
+.role-tag {
+  color: #818cf8;
+  font-weight: 700;
+}
+
+.auth-required-box, .accept-box {
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.auth-required-box p, .accept-box p {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.btn-primary {
+  width: 100%;
+  background: #6366f1;
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-primary:hover {
+  background: #4f46e5;
+}
+
+.error-card .error-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.success-card .success-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}

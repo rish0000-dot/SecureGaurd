@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useNavigate, useSearchParams } from 'react-router-dom'
 import './index.css'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
@@ -11,6 +11,8 @@ import Footer from './components/Footer'
 import AuthPage from './components/AuthPage'
 import Dashboard from './components/Dashboard'
 import OnboardingWizard from './components/OnboardingWizard'
+import VulnerabilityDetailsPage from './components/VulnerabilityDetailsPage'
+import { AcceptInvitePage } from './components/AcceptInvitePage'
 
 function Home() {
   return (
@@ -29,6 +31,20 @@ function Home() {
   )
 }
 
+function InviteRouteHandler() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const token = searchParams.get('token') || '';
+
+  return (
+    <AcceptInvitePage
+      token={token}
+      onAccepted={() => navigate('/dashboard')}
+      onNavigateAuth={() => navigate(`/login?redirect=/accept-invite?token=${token}`)}
+    />
+  );
+}
+
 function App() {
   return (
     <Router>
@@ -38,6 +54,8 @@ function App() {
         <Route path="/login" element={<AuthPage defaultMode="login" />} />
         <Route path="/onboarding" element={<OnboardingWizard />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/vulnerabilities/:id" element={<VulnerabilityDetailsPage />} />
+        <Route path="/accept-invite" element={<InviteRouteHandler />} />
       </Routes>
     </Router>
   )

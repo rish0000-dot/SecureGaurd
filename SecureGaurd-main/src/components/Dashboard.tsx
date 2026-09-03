@@ -6,9 +6,14 @@ import {
   CheckCircle2, XCircle, Clock, Activity,
   FileCode2, Zap, Settings, Database, BarChart3,
   Play, RefreshCw, Eye, Filter, ArrowUpRight,
-  Plus, X, Trash2, Globe
+  Plus, X, Trash2, Globe, FileCheck, Users, CreditCard, Layers
 } from 'lucide-react';
 import { useAuth, authFetch } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
+import { OrganizationSwitcher } from './OrganizationSwitcher';
+import { OrganizationSettingsModal } from './OrganizationSettingsModal';
+import ComplianceReports from './ComplianceReports';
+import SbomPage from './SbomPage';
 import './Dashboard.css';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -90,9 +95,12 @@ function StatusBadge({ s }: { s: string }) {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, accessToken, refreshSession, logout } = useAuth();
+  const { activeOrg, activeOrgId, activeRole, orgFetch } = useOrganization();
   
   // Navigation
   const [activeNav, setActiveNav] = useState('overview');
+  const [isOrgSettingsOpen, setIsOrgSettingsOpen] = useState(false);
+  const [orgSettingsTab, setOrgSettingsTab] = useState<'members' | 'invitations' | 'audit' | 'billing' | 'settings'>('billing');
   
   // DB Connected states
   const [repos, setRepos] = useState<Repository[]>([]);
@@ -116,6 +124,7 @@ export default function Dashboard() {
   const [scanProgress, setScanProgress] = useState(0);
   const [scanFile, setScanFile] = useState('');
   const [filterSev, setFilterSev] = useState<string>('ALL');
+  const [filterType, setFilterType] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
 
@@ -150,34 +159,24 @@ export default function Dashboard() {
     }
   }, [user, navigate]);
 
-  // Fetch initial repositories and stats
+  // Fetch initial repositories and stats whenever activeOrgId or token changes
   const fetchData = async () => {
     if (!accessToken) return;
     try {
       // 1. Fetch repositories
-      const reposRes = await authFetch(
-        '/api/repos',
-        {},
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const reposRes = await orgFetch('/api/repos');
       if (reposRes.ok) {
         const reposData = await reposRes.json();
         setRepos(reposData);
-        if (reposData.length > 0 && !selectedRepo) {
+        if (reposData.length > 0) {
           setSelectedRepo(reposData[0]);
+        } else {
+          setSelectedRepo(null);
         }
       }
 
       // 2. Fetch stats
-      const statsRes = await authFetch(
-        '/api/scans/stats/summary',
-        {},
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const statsRes = await orgFetch('/api/scans/stats/summary');
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats({
@@ -193,13 +192,7 @@ export default function Dashboard() {
       }
 
       // 3. Fetch vulnerabilities
-      const vulnsRes = await authFetch(
-        '/api/vulnerabilities',
-        {},
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const vulnsRes = await orgFetch('/api/vulnerabilities');
       if (vulnsRes.ok) {
         const vulnsData = await vulnsRes.json();
         setVulns(vulnsData);
@@ -215,26 +208,14 @@ export default function Dashboard() {
       }
 
       // 4. Fetch Scan logs
-      const scansRes = await authFetch(
-        '/api/scans',
-        {},
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const scansRes = await orgFetch('/api/scans');
       if (scansRes.ok) {
         const scansData = await scansRes.json();
         setScans(scansData);
       }
 
       // 5. Fetch integration tokens status
-      const tokensRes = await authFetch(
-        '/api/integration/tokens',
-        {},
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const tokensRes = await orgFetch('/api/integration/tokens');
       if (tokensRes.ok) {
         const tokensData = await tokensRes.json();
         setHasGithubToken(tokensData.hasGithub);
@@ -244,6 +225,12 @@ export default function Dashboard() {
       console.error('Error fetching dashboard data:', err);
     }
   };
+
+  useEffect(() => {
+    if (accessToken && activeOrgId) {
+      fetchData();
+    }
+  }, [accessToken, activeOrgId]);
 
   const handleSaveTokens = async (platform: 'github' | 'gitlab', tokenValue: string) => {
     if (!accessToken) return;
@@ -278,13 +265,7 @@ export default function Dashboard() {
     setLoadingRemote(true);
     setRemoteRepos([]);
     try {
-      const res = await authFetch(
-        `/api/integration/repos?platform=${platform}`,
-        {},
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const res = await orgFetch(`/api/integration/repos?platform=${platform}`);
       if (res.ok) {
         const data = await res.json();
         setRemoteRepos(data);
@@ -297,10 +278,10 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (user && accessToken) {
+    if (user && accessToken && activeOrgId) {
       fetchData();
     }
-  }, [user, accessToken]);
+  }, [user, accessToken, activeOrgId]);
 
   useEffect(() => {
     if (isConnectModalOpen && (newRepoPlatform === 'github' || newRepoPlatform === 'gitlab')) {
@@ -315,27 +296,21 @@ export default function Dashboard() {
     }
   }, [isConnectModalOpen, newRepoPlatform, hasGithubToken, hasGitlabToken]);
 
-  // Seed default repository if none connected
+  // Seed default repository if none connected in active organization
   useEffect(() => {
     const seedDefaultRepo = async () => {
-      if (user && accessToken && repos.length === 0) {
+      if (user && accessToken && activeOrgId && repos.length === 0) {
         try {
-          await authFetch(
-            '/api/repos',
-            {
-              method: 'POST',
-              body: JSON.stringify({
-                name: 'secureguard-main',
-                fullName: `${user.firstName.toLowerCase()}/secureguard-main`,
-                url: `https://github.com/${user.firstName.toLowerCase()}/secureguard-main`,
-                platform: 'github',
-                language: 'TypeScript'
-              })
-            },
-            accessToken,
-            refreshSession,
-            () => accessToken
-          );
+          await orgFetch('/api/repos', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: 'secureguard-main',
+              fullName: `${user.firstName.toLowerCase()}/secureguard-main`,
+              url: `https://github.com/${user.firstName.toLowerCase()}/secureguard-main`,
+              platform: 'github',
+              language: 'TypeScript'
+            })
+          });
           fetchData();
         } catch (e) {
           console.error(e);
@@ -343,7 +318,7 @@ export default function Dashboard() {
       }
     };
     seedDefaultRepo();
-  }, [repos, user, accessToken]);
+  }, [repos, user, accessToken, activeOrgId]);
 
   const handleLogout = async () => {
     await logout();
@@ -354,22 +329,16 @@ export default function Dashboard() {
     e.preventDefault();
     if (!accessToken) return;
     try {
-      const res = await authFetch(
-        '/api/repos',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            name: newRepoName,
-            fullName: newRepoFullName || newRepoName,
-            url: newRepoUrl,
-            platform: newRepoPlatform,
-            language: newRepoLang
-          })
-        },
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const res = await orgFetch('/api/repos', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newRepoName,
+          fullName: newRepoFullName || newRepoName,
+          url: newRepoUrl,
+          platform: newRepoPlatform,
+          language: newRepoLang
+        })
+      });
       if (res.ok) {
         setIsConnectModalOpen(false);
         setNewRepoName('');
@@ -388,18 +357,15 @@ export default function Dashboard() {
   const handleDeleteRepo = async (id: number) => {
     if (!window.confirm('Are you sure you want to disconnect this repository?') || !accessToken) return;
     try {
-      const res = await authFetch(
-        `/api/repos/${id}`,
-        { method: 'DELETE' },
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const res = await orgFetch(`/api/repos/${id}`, { method: 'DELETE' });
       if (res.ok) {
         if (selectedRepo?.id === id) {
           setSelectedRepo(null);
         }
         fetchData();
+      } else {
+        const errData = await res.json();
+        alert(errData.message || 'Failed to delete repository.');
       }
     } catch (err) {
       console.error(err);
@@ -428,16 +394,10 @@ export default function Dashboard() {
         
         (async () => {
           try {
-            const res = await authFetch(
-              '/api/scans/trigger',
-              {
-                method: 'POST',
-                body: JSON.stringify({ repositoryId: selectedRepo.id })
-              },
-              accessToken,
-              refreshSession,
-              () => accessToken
-            );
+            const res = await orgFetch('/api/scans/trigger', {
+              method: 'POST',
+              body: JSON.stringify({ repositoryId: selectedRepo.id })
+            });
             if (res.ok) {
               await fetchData();
             }
@@ -455,16 +415,10 @@ export default function Dashboard() {
   const handleUpdateVulnStatus = async (vulnId: number, status: string) => {
     if (!accessToken) return;
     try {
-      const res = await authFetch(
-        `/api/vulnerabilities/${vulnId}/status`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ status })
-        },
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const res = await orgFetch(`/api/vulnerabilities/${vulnId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+      });
       if (res.ok) {
         fetchData();
       }
@@ -477,13 +431,7 @@ export default function Dashboard() {
     if (!accessToken) return;
     setGeneratingFix(true);
     try {
-      const res = await authFetch(
-        `/api/ai/fix/${vulnId}`,
-        { method: 'POST' },
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const res = await orgFetch(`/api/ai/fix/${vulnId}`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         setSelectedVuln((prev: any) => {
@@ -511,13 +459,7 @@ export default function Dashboard() {
   const handleApplyAiFix = async (vulnId: number) => {
     if (!accessToken) return;
     try {
-      const res = await authFetch(
-        `/api/ai/fix/${vulnId}/apply`,
-        { method: 'PATCH' },
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const res = await orgFetch(`/api/ai/fix/${vulnId}/apply`, { method: 'PATCH' });
       if (res.ok) {
         setSelectedVuln((prev: any) => {
           if (prev && prev.id === vulnId) {
@@ -538,13 +480,7 @@ export default function Dashboard() {
   const handleMarkFalsePositive = async (vulnId: number) => {
     if (!accessToken) return;
     try {
-      const res = await authFetch(
-        `/api/ai/false-positive/${vulnId}`,
-        { method: 'PATCH' },
-        accessToken,
-        refreshSession,
-        () => accessToken
-      );
+      const res = await orgFetch(`/api/ai/false-positive/${vulnId}`, { method: 'PATCH' });
       if (res.ok) {
         setSelectedVuln((prev: any) => {
           if (prev && prev.id === vulnId) {
@@ -577,9 +513,12 @@ export default function Dashboard() {
   // Filtering
   const filteredVulns = vulns.filter(v => {
     const matchesSev = filterSev === 'ALL' || v.severity.toUpperCase() === filterSev;
+    const matchesType = filterType === 'ALL' || 
+                        v.type.toUpperCase() === filterType || 
+                        (v.mlFeatures?.framework && v.mlFeatures.framework.toUpperCase() === filterType);
     const matchesSearch = v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           v.filePath.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesSev && matchesSearch;
+    return matchesSev && matchesType && matchesSearch;
   });
 
   const filteredRepos = repos.filter(r => 
@@ -659,6 +598,34 @@ export default function Dashboard() {
             <span>Analytics</span>
           </button>
           <button
+            className={`dash-nav-item ${activeNav === 'compliance' ? 'active' : ''}`}
+            onClick={() => setActiveNav('compliance')}
+          >
+            <FileCheck size={17} />
+            <span>Compliance Reports</span>
+          </button>
+          <button
+            className={`dash-nav-item ${activeNav === 'sbom' ? 'active' : ''}`}
+            onClick={() => setActiveNav('sbom')}
+          >
+            <Layers size={17} />
+            <span>Software SBOM</span>
+          </button>
+          <button
+            className="dash-nav-item"
+            onClick={() => { setOrgSettingsTab('members'); setIsOrgSettingsOpen(true); }}
+          >
+            <Users size={17} />
+            <span>Team & Members</span>
+          </button>
+          <button
+            className="dash-nav-item"
+            onClick={() => { setOrgSettingsTab('billing'); setIsOrgSettingsOpen(true); }}
+          >
+            <CreditCard size={17} />
+            <span>Billing & Usage</span>
+          </button>
+          <button
             className={`dash-nav-item ${activeNav === 'settings' ? 'active' : ''}`}
             onClick={() => setActiveNav('settings')}
           >
@@ -694,6 +661,7 @@ export default function Dashboard() {
               {activeNav === 'scans' && 'Scan Log History'}
               {activeNav === 'vulndb' && 'Vulnerability Database'}
               {activeNav === 'analytics' && 'Analytics'}
+              {activeNav === 'compliance' && 'Compliance Reports'}
               {activeNav === 'settings' && 'Account Settings'}
             </h1>
             <p className="dash-page-sub">
@@ -713,10 +681,12 @@ export default function Dashboard() {
               {activeNav === 'scans' && 'Timeline of evaluated codebase scan audits'}
               {activeNav === 'vulndb' && 'Exploration index of all detected system vulnerabilities'}
               {activeNav === 'analytics' && 'Interactive vulnerability and risk reporting breakdowns'}
+              {activeNav === 'compliance' && 'Generate security compliance reports from your organization\'s scan results'}
               {activeNav === 'settings' && 'Manage passwords and workspace configurations'}
             </p>
           </div>
           <div className="dash-header-right">
+            <OrganizationSwitcher onOpenSettings={() => setIsOrgSettingsOpen(true)} />
             <div className="dash-search">
               <Search size={15} />
               <input 
@@ -825,7 +795,7 @@ export default function Dashboard() {
                     <h2 className="section-title">Detected Issues</h2>
                     <p className="section-sub">{filteredVulns.length} vulnerabilities found</p>
                   </div>
-                  <div className="vuln-filters">
+                  <div className="vuln-filters" style={{ flexWrap: 'wrap', gap: '6px' }}>
                     <Filter size={14} />
                     {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(s => (
                       <button
@@ -834,6 +804,16 @@ export default function Dashboard() {
                         onClick={() => setFilterSev(s)}
                       >
                         {s}
+                      </button>
+                    ))}
+                    <div style={{ height: '16px', width: '1px', background: 'var(--border-color)', margin: '0 2px' }} />
+                    {['ALL', 'SAST', 'IAC', 'API', 'TERRAFORM', 'KUBERNETES', 'DOCKER'].map(t => (
+                      <button
+                        key={t}
+                        className={`filter-btn ${filterType === t ? 'active' : ''}`}
+                        onClick={() => setFilterType(t)}
+                      >
+                        {t}
                       </button>
                     ))}
                   </div>
@@ -858,15 +838,16 @@ export default function Dashboard() {
                             key={v.id}
                             className={`vuln-row ${selectedVuln?.id === v.id ? 'vuln-row--active' : ''}`}
                             onClick={() => setSelectedVuln(v)}
+                            onDoubleClick={() => navigate(`/vulnerabilities/${v.id}`)}
                           >
-                            <td><code className="vuln-id">V-{String(v.id).padStart(3, '0')}</code></td>
+                            <td><code className="vuln-id" style={{cursor: 'pointer'}} onClick={() => navigate(`/vulnerabilities/${v.id}`)}>V-{String(v.id).padStart(3, '0')}</code></td>
                             <td><span className="vuln-file"><FileCode2 size={13} />{v.filePath}</span></td>
-                            <td>{v.title}</td>
+                            <td><span style={{cursor: 'pointer', fontWeight: 600, color: '#e0e7ff'}} onClick={() => navigate(`/vulnerabilities/${v.id}`)}>{v.title}</span></td>
                             <td><SeverityBadge s={v.severity} /></td>
                             <td><StatusBadge s={v.status} /></td>
                             <td>
-                              <button className="row-action-btn" onClick={e => { e.stopPropagation(); setSelectedVuln(v); }}>
-                                <Eye size={14} />
+                              <button className="row-action-btn" title="View Full Details" onClick={e => { e.stopPropagation(); navigate(`/vulnerabilities/${v.id}`); }}>
+                                <ArrowUpRight size={14} />
                               </button>
                             </td>
                           </tr>
@@ -1030,30 +1011,41 @@ export default function Dashboard() {
                     )}
                   </div>
 
-                  <div className="detail-actions" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '0.5rem' }}>
-                    {selectedVuln.status === 'open' ? (
-                      <>
-                        <button 
-                          className="detail-action-btn detail-action-btn--primary"
-                          onClick={() => handleUpdateVulnStatus(selectedVuln.id, 'fixed')}
-                        >
-                          <CheckCircle2 size={14} /> Resolve Issue
-                        </button>
+                  <div className="detail-actions" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <button 
+                      className="detail-action-btn detail-action-btn--primary"
+                      style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', color: '#fff', fontWeight: 600 }}
+                      onClick={() => navigate(`/vulnerabilities/${selectedVuln.id}`)}
+                    >
+                      <ArrowUpRight size={14} /> Open Full Details Page
+                    </button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                      {selectedVuln.status === 'open' ? (
+                        <>
+                          <button 
+                            className="detail-action-btn"
+                            style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' }}
+                            onClick={() => handleUpdateVulnStatus(selectedVuln.id, 'fixed')}
+                          >
+                            <CheckCircle2 size={13} /> Resolve
+                          </button>
+                          <button 
+                            className="detail-action-btn"
+                            onClick={() => handleUpdateVulnStatus(selectedVuln.id, 'ignored')}
+                          >
+                            Ignore
+                          </button>
+                        </>
+                      ) : (
                         <button 
                           className="detail-action-btn"
-                          onClick={() => handleUpdateVulnStatus(selectedVuln.id, 'ignored')}
+                          style={{ gridColumn: 'span 2' }}
+                          onClick={() => handleUpdateVulnStatus(selectedVuln.id, 'open')}
                         >
-                          Ignore Finding
+                          Reopen Finding
                         </button>
-                      </>
-                    ) : (
-                      <button 
-                        className="detail-action-btn detail-action-btn--primary"
-                        onClick={() => handleUpdateVulnStatus(selectedVuln.id, 'open')}
-                      >
-                        Reopen Finding
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </aside>
               )}
@@ -1248,13 +1240,10 @@ export default function Dashboard() {
                     <td>
                       <button 
                         className="connect-repo-btn" 
-                        style={{padding: '4px 10px', fontSize: '0.75rem'}}
-                        onClick={() => {
-                          setSelectedVuln(v);
-                          setActiveNav('overview');
-                        }}
+                        style={{padding: '4px 10px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '4px'}}
+                        onClick={() => navigate(`/vulnerabilities/${v.id}`)}
                       >
-                        Inspect Code
+                        <ArrowUpRight size={13} /> View Details
                       </button>
                     </td>
                   </tr>
@@ -1465,6 +1454,20 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* ── Tab: Compliance Reports ── */}
+        {activeNav === 'compliance' && (
+          <ComplianceReports
+            accessToken={accessToken}
+            refreshSession={refreshSession}
+            repos={repos}
+          />
+        )}
+
+        {/* ── Tab: Software Bill of Materials (SBOM) ── */}
+        {activeNav === 'sbom' && (
+          <SbomPage selectedRepoId={selectedRepo?.id} />
+        )}
       </main>
 
       {/* ── Connect Repository Modal ── */}
@@ -1590,6 +1593,12 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <OrganizationSettingsModal
+        isOpen={isOrgSettingsOpen}
+        onClose={() => setIsOrgSettingsOpen(false)}
+        initialTab={orgSettingsTab}
+      />
     </div>
   );
 }

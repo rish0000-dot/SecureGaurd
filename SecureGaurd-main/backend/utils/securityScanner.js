@@ -119,6 +119,11 @@ function isVulnerable(versionStr, maxVulnerable) {
   }
 }
 
+const { scanTerraformFile } = require('./iacTerraformScanner');
+const { scanKubernetesFile } = require('./iacK8sScanner');
+const { scanDockerfile } = require('./iacDockerScanner');
+const { scanAPISpecFile } = require('./apiSpecScanner');
+
 // ── Recursive Directory Traversal ─────────────────────────────────────────────
 function scanDirectory(dir, rootDir, findings = [], fileCountRef = { count: 0 }, lineCountRef = { count: 0 }) {
   const list = fs.readdirSync(dir);
@@ -179,11 +184,47 @@ function scanDirectory(dir, rootDir, findings = [], fileCountRef = { count: 0 },
         }
       }
 
-      // 2. Code Security Scanner
-      const ext = path.extname(item);
+      // 2. Advanced IaC & API Specification Scanners
+      const ext = path.extname(item).toLowerCase();
+      const lowerItem = item.toLowerCase();
+
+      // Terraform (.tf, .tf.json)
+      if (ext === '.tf' || item.endsWith('.tf.json')) {
+        const tfFindings = scanTerraformFile(fullPath, relPath);
+        findings.push(...tfFindings);
+      }
+
+      // Kubernetes & OpenAPI (.yaml, .yml)
+      if (ext === '.yaml' || ext === '.yml') {
+        try {
+          const sampleContent = fs.readFileSync(fullPath, 'utf8');
+          if (/(?:openapi|swagger)\s*:/i.test(sampleContent) || /openapi|swagger/i.test(lowerItem)) {
+            const apiFindings = scanAPISpecFile(fullPath, relPath);
+            findings.push(...apiFindings);
+          }
+          if (/apiVersion\s*:/i.test(sampleContent) && /kind\s*:/i.test(sampleContent)) {
+            const k8sFindings = scanKubernetesFile(fullPath, relPath);
+            findings.push(...k8sFindings);
+          }
+        } catch (e) {}
+      }
+
+      // OpenAPI JSON
+      if (ext === '.json' && (lowerItem.includes('openapi') || lowerItem.includes('swagger'))) {
+        const apiFindings = scanAPISpecFile(fullPath, relPath);
+        findings.push(...apiFindings);
+      }
+
+      // Dockerfile
+      if (lowerItem === 'dockerfile' || lowerItem.startsWith('dockerfile.') || ext === '.dockerfile') {
+        const dockerFindings = scanDockerfile(fullPath, relPath);
+        findings.push(...dockerFindings);
+      }
+
+      // 3. Code Security Scanner (SAST & Secrets)
       const isCodeFile = ['.js', '.jsx', '.ts', '.tsx', '.py', '.tf', 'Dockerfile'].includes(ext) || item === 'Dockerfile';
       
-      if (isCodeFile) {
+      if (isCodeFile && ext !== '.tf' && lowerItem !== 'dockerfile') {
         try {
           const content = fs.readFileSync(fullPath, 'utf8');
           const lines = content.split('\n');
@@ -211,11 +252,6 @@ function scanDirectory(dir, rootDir, findings = [], fileCountRef = { count: 0 },
                 };
                 const cweId = CWE_MAP[rule.id] || 'CWE-Other';
 
-                // Only extract AST features for JS/TS SAST findings.
-                // SEC-* (hardcoded secrets) are intentionally excluded from ML filtering:
-                // the synthetic training data has insufficient signal for secrets
-                // (raw score range -0.57 to +0.08 before 1.2-sigma noise), causing
-                // unreliable classification. Secrets are always preserved as REAL findings.
                 const isSastRule = rule.id.startsWith('SAST-');
                 if (isSastRule && ['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
                   const { extractASTFeatures } = require('./astExtractor');
@@ -246,6 +282,8 @@ function scanDirectory(dir, rootDir, findings = [], fileCountRef = { count: 0 },
   }
 }
 
+const { extractRepositorySbomComponents } = require('./sbomExtractor');
+
 // ── Main Scan Execution Endpoint ──────────────────────────────────────────────
 function runSecurityScan(projectPath) {
   const findings = [];
@@ -257,9 +295,24 @@ function runSecurityScan(projectPath) {
     scanDirectory(projectPath, projectPath, findings, fileCountRef, lineCountRef);
   }
   const endTime = Date.now();
+
+  const sbomComponents = extractRepositorySbomComponents(projectPath);
+
+  const summaryStats = {
+    sourceCodeCount: findings.filter(f => f.type === 'sast' || f.type === 'secret' || f.type === 'dependency').length,
+    iacCount: findings.filter(f => f.type === 'iac').length,
+    apiCount: findings.filter(f => f.type === 'api').length,
+    terraformCount: findings.filter(f => f.mlFeatures?.framework === 'Terraform').length,
+    k8sCount: findings.filter(f => f.mlFeatures?.framework === 'Kubernetes').length,
+    dockerCount: findings.filter(f => f.mlFeatures?.framework === 'Docker').length,
+    openApiCount: findings.filter(f => f.mlFeatures?.framework === 'OpenAPI').length,
+    sbomComponentCount: sbomComponents.length
+  };
   
   return {
     findings,
+    sbomComponents,
+    summaryStats,
     totalFiles: fileCountRef.count,
     totalLines: lineCountRef.count,
     durationMs: endTime - startTime

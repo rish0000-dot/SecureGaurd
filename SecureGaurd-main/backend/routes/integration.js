@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../prismaClient');
 const authMiddleware = require('../middleware/auth');
+const { requireOrgContext, createAuditLog } = require('../middleware/rbac');
 const { runSecurityScan } = require('../utils/securityScanner');
 const path = require('path');
 const crypto = require('crypto');
@@ -17,7 +18,7 @@ const webhookLimiter = rateLimit({
 // Helper: Verify GitHub/GitLab Webhook Signatures
 function verifyWebhookSignature(platform, req) {
   const secret = process.env.WEBHOOK_SECRET;
-  if (!secret) return true; // Optional in dev mode if WEBHOOK_SECRET is not configured
+  if (!secret) return true; // Optional in dev mode
 
   if (platform === 'github') {
     const signature = req.headers['x-hub-signature-256'];
@@ -62,7 +63,7 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Could not extract repository full name from payload' });
     }
 
-    // Find the repository and user in database
+    // Find the repository in database
     const repo = await prisma.repository.findFirst({
       where: { fullName: repoFullName, platform },
     });
@@ -72,13 +73,12 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
     }
 
     // Trigger scanning of the repository
-    const scanPath = path.join(__dirname, '..', '..'); // scan parent directory locally
+    const scanPath = path.join(__dirname, '..', '..');
     const scanResult = runSecurityScan(scanPath);
 
-    // Fetch historical tracking metrics from DB to append to ML Features
+    // Append ML Features
     for (let finding of scanResult.findings) {
       if (finding.mlFeatures) {
-        // Count how many times this specific rule + file was seen before
         const seenCount = await prisma.vulnerability.count({
           where: {
             ruleId: finding.ruleId,
@@ -88,7 +88,6 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
         });
         finding.mlFeatures.same_finding_seen_before_count = seenCount;
 
-        // Count how many times a similar finding was dismissed
         const dismissedCount = await prisma.vulnerability.count({
           where: {
             ruleId: finding.ruleId,
@@ -97,15 +96,13 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
           }
         });
         finding.mlFeatures.developer_dismissed_similar_before = dismissedCount;
-        finding.mlFeatures.file_change_frequency = 0; // Fallback limitation
+        finding.mlFeatures.file_change_frequency = 0;
 
-        // Fill required IDs
         finding.mlFeatures.rule_id = finding.ruleId;
         finding.mlFeatures.cwe_id = finding.cweId;
       }
     }
 
-    // Filter Findings via ML Classifier
     let finalFindings = scanResult.findings;
     const sastFindings = scanResult.findings.filter(f => f.mlFeatures);
     
@@ -131,11 +128,9 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
             ...scanResult.findings.filter(f => !f.mlFeatures),
             ...realSastFindings
           ];
-        } else {
-          console.warn(`[ML Service Error] Classifier returned status ${response.status}. Defaulting all findings to REAL.`);
         }
       } catch (err) {
-        console.warn(`[ML Service Error] Failed to reach FP classifier at ${process.env.FP_CLASSIFIER_URL}. Fallback: keeping all findings. Error: ${err.message}`);
+        console.warn(`[ML Service Error] Error: ${err.message}`);
       }
     }
 
@@ -145,10 +140,11 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
     const lowCount  = finalFindings.filter(f => f.severity === 'low').length;
     const secrets   = finalFindings.filter(f => f.type === 'secret').length;
 
-    // Create the scan entry in the DB
+    // Create scan with repository's organizationId
     const scan = await prisma.scan.create({
       data: {
         userId: repo.userId,
+        organizationId: repo.organizationId,
         repositoryId: repo.id,
         status: 'completed',
         branch,
@@ -182,15 +178,22 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
       await prisma.vulnerability.createMany({ data: dbFindings });
     }
 
-    // Update repository risk level
     const riskLevel = critCount > 0 ? 'critical' : highCount > 2 ? 'high' : medCount > 3 ? 'medium' : 'low';
     await prisma.repository.update({
       where: { id: repo.id },
       data: { riskLevel, updatedAt: new Date() },
     });
 
-    // PR Bot check action simulation
-    console.log(`[PR Bot] Scanned commit ${commitSha}. Found ${scanResult.findings.length} issues.`);
+    if (repo.organizationId) {
+      await createAuditLog(
+        repo.organizationId,
+        repo.userId,
+        'WEBHOOK_SCAN_COMPLETED',
+        'SCAN',
+        String(scan.id),
+        { repoName: repo.fullName, platform, commitSha }
+      );
+    }
 
     return res.status(200).json({
       message: 'Webhook processed, scan successfully completed',
@@ -203,10 +206,10 @@ router.post('/webhook/:platform', webhookLimiter, async (req, res) => {
   }
 });
 
-// Protect all other routes below with authentication middleware
+// Protect all authenticated integration endpoints below
 router.use(authMiddleware);
 
-// GET /api/integration/tokens: Check user configuration for tokens
+// GET /api/integration/tokens
 router.get('/tokens', async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -224,7 +227,7 @@ router.get('/tokens', async (req, res) => {
   }
 });
 
-// POST /api/integration/tokens: Save personal access tokens (encrypted at rest)
+// POST /api/integration/tokens
 router.post('/tokens', async (req, res) => {
   const { githubToken, gitlabToken } = req.body;
   try {
@@ -243,7 +246,7 @@ router.post('/tokens', async (req, res) => {
   }
 });
 
-// GET /api/integration/repos: Get active repositories from Github/Gitlab using PAT
+// GET /api/integration/repos
 router.get('/repos', async (req, res) => {
   const { platform } = req.query;
   if (!platform || (platform !== 'github' && platform !== 'gitlab')) {
@@ -261,7 +264,7 @@ router.get('/repos', async (req, res) => {
     const rawToken = platform === 'github' ? user.githubToken : user.gitlabToken;
     const token = decrypt(rawToken);
     if (!token) {
-      return res.status(200).json([]); // Return empty list if no token is configured
+      return res.status(200).json([]);
     }
 
     if (platform === 'github') {
@@ -285,7 +288,6 @@ router.get('/repos', async (req, res) => {
       }));
       return res.json(repos);
     } else {
-      // GitLab API
       const response = await fetch('https://gitlab.com/api/v4/projects?owned=true&per_page=50', {
         headers: {
           'PRIVATE-TOKEN': token
@@ -310,8 +312,8 @@ router.get('/repos', async (req, res) => {
   }
 });
 
-// POST /api/integration/pr-bot: Simulate a PR Bot check response
-router.post('/pr-bot', async (req, res) => {
+// POST /api/integration/pr-bot: Simulate a PR Bot check response (with org context)
+router.post('/pr-bot', requireOrgContext, async (req, res) => {
   const { repositoryId, commitSha, prNumber } = req.body;
   if (!repositoryId || !commitSha) {
     return res.status(400).json({ message: 'repositoryId and commitSha are required' });
@@ -319,13 +321,12 @@ router.post('/pr-bot', async (req, res) => {
 
   try {
     const repo = await prisma.repository.findFirst({
-      where: { id: parseInt(repositoryId), userId: req.userId },
+      where: { id: parseInt(repositoryId), organizationId: req.organizationId },
     });
-    if (!repo) return res.status(404).json({ message: 'Repository not found' });
+    if (!repo) return res.status(404).json({ message: 'Repository not found in active organization' });
 
-    // Fetch the latest scan for this commit or repo
     const scan = await prisma.scan.findFirst({
-      where: { repositoryId: repo.id, userId: req.userId },
+      where: { repositoryId: repo.id, organizationId: req.organizationId },
       orderBy: { createdAt: 'desc' },
       include: { vulnerabilities: true }
     });
@@ -341,8 +342,6 @@ router.post('/pr-bot', async (req, res) => {
       issuesFound: scan ? scan.criticalCount + scan.highCount : 0,
       reportUrl: `http://localhost:5173/dashboard`
     };
-
-    console.log(`[PR Bot Action Logged]`, checkSummary);
 
     res.json({
       message: 'PR Bot check simulated successfully',

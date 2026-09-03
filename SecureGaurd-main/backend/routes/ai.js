@@ -2,17 +2,22 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../prismaClient');
 const authMiddleware = require('../middleware/auth');
+const { requireOrgContext, createAuditLog } = require('../middleware/rbac');
 const { generateAiFix } = require('../utils/aiFixEngine');
 
 router.use(authMiddleware);
+router.use(requireOrgContext);
 
 // POST /api/ai/fix/:vulnId — Generate AI fix for a vulnerability
 router.post('/fix/:vulnId', async (req, res) => {
+  const vulnId = parseInt(req.params.vulnId);
+  if (isNaN(vulnId)) return res.status(400).json({ message: 'Invalid vulnerability ID' });
+
   try {
     const vuln = await prisma.vulnerability.findFirst({
       where: {
-        id: parseInt(req.params.vulnId),
-        scan: { userId: req.userId }
+        id: vulnId,
+        scan: { organizationId: req.organizationId }
       }
     });
     if (!vuln) return res.status(404).json({ message: 'Vulnerability not found' });
@@ -40,6 +45,15 @@ router.post('/fix/:vulnId', async (req, res) => {
       }
     });
 
+    await createAuditLog(
+      req.organizationId,
+      req.userId,
+      'AI_FIX_GENERATED',
+      'VULNERABILITY',
+      String(vuln.id),
+      { title: vuln.title, engine: result.engine }
+    );
+
     res.json({
       vulnId: vuln.id,
       fixedCode: result.fixedCode,
@@ -59,11 +73,14 @@ router.post('/fix/:vulnId', async (req, res) => {
 
 // PATCH /api/ai/fix/:vulnId/apply — Mark AI fix as applied + resolve vulnerability
 router.patch('/fix/:vulnId/apply', async (req, res) => {
+  const vulnId = parseInt(req.params.vulnId);
+  if (isNaN(vulnId)) return res.status(400).json({ message: 'Invalid vulnerability ID' });
+
   try {
     const vuln = await prisma.vulnerability.findFirst({
       where: {
-        id: parseInt(req.params.vulnId),
-        scan: { userId: req.userId }
+        id: vulnId,
+        scan: { organizationId: req.organizationId }
       }
     });
     if (!vuln) return res.status(404).json({ message: 'Vulnerability not found' });
@@ -74,6 +91,15 @@ router.patch('/fix/:vulnId/apply', async (req, res) => {
       data: { aiFixApplied: true, status: 'fixed', userLabel: 'real' }
     });
 
+    await createAuditLog(
+      req.organizationId,
+      req.userId,
+      'AI_FIX_APPLIED',
+      'VULNERABILITY',
+      String(vuln.id),
+      { title: vuln.title }
+    );
+
     res.json({ message: 'AI fix applied successfully', vulnerability: updated });
   } catch (err) {
     console.error('[AI Apply]', err);
@@ -83,11 +109,14 @@ router.patch('/fix/:vulnId/apply', async (req, res) => {
 
 // PATCH /api/ai/false-positive/:vulnId — Mark as false positive
 router.patch('/false-positive/:vulnId', async (req, res) => {
+  const vulnId = parseInt(req.params.vulnId);
+  if (isNaN(vulnId)) return res.status(400).json({ message: 'Invalid vulnerability ID' });
+
   try {
     const vuln = await prisma.vulnerability.findFirst({
       where: {
-        id: parseInt(req.params.vulnId),
-        scan: { userId: req.userId }
+        id: vulnId,
+        scan: { organizationId: req.organizationId }
       }
     });
     if (!vuln) return res.status(404).json({ message: 'Vulnerability not found' });

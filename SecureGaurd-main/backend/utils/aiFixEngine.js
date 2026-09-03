@@ -145,6 +145,84 @@ const FIX_RULES = {
     cvssScore: 7.5,
     references: ['https://github.com/advisories/GHSA-42xw-2xvc-qx8m']
   },
+
+  // IaC & API Specification Fix Rules
+  'Publicly Accessible Storage Bucket': {
+    confidence: 95,
+    explanation: 'Storage buckets must block public ACLs and public bucket policies to prevent accidental data leaks.',
+    fixTemplate: (snippet) => {
+      return `# FIXED: Restrict public access on S3 Bucket\nresource "aws_s3_bucket" "private_bucket" {\n  bucket = "secure-data-bucket"\n}\n\nresource "aws_s3_bucket_public_access_block" "block_public" {\n  bucket                  = aws_s3_bucket.private_bucket.id\n  block_public_acls       = true\n  block_public_policy     = true\n  ignore_public_acls      = true\n  restrict_public_buckets = true\n}`;
+    },
+    cweId: 'CWE-200',
+    cvssScore: 8.6,
+    references: ['https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html']
+  },
+
+  'Missing Server-Side Storage Encryption': {
+    confidence: 95,
+    explanation: 'Storage resources should be encrypted at rest using KMS or AES256 server-side encryption.',
+    fixTemplate: (snippet) => {
+      return `# FIXED: Enable Server-Side Encryption\nresource "aws_s3_bucket_server_side_encryption_configuration" "encrypt" {\n  bucket = aws_s3_bucket.my_bucket.id\n  rule {\n    apply_server_side_encryption_by_default {\n      sse_algorithm = "AES256"\n    }\n  }\n}`;
+    },
+    cweId: 'CWE-311',
+    cvssScore: 7.5,
+    references: ['https://cwe.mitre.org/data/definitions/311.html']
+  },
+
+  'Overly Permissive Ingress Rule (0.0.0.0/0)': {
+    confidence: 95,
+    explanation: 'Avoid 0.0.0.0/0 CIDR block ingress rules on sensitive ports. Restrict network access to trusted IP ranges.',
+    fixTemplate: (snippet) => {
+      return `# FIXED: Restrict ingress CIDR blocks\ningress {\n  from_port   = 22\n  to_port     = 22\n  protocol    = "tcp"\n  cidr_blocks = ["10.0.0.0/16"] # Restricted internal subnet\n}`;
+    },
+    cweId: 'CWE-284',
+    cvssScore: 9.1,
+    references: ['https://cwe.mitre.org/data/definitions/284.html']
+  },
+
+  'Privileged Container Execution': {
+    confidence: 98,
+    explanation: 'Disable privileged execution on container securityContext to prevent host root breakout.',
+    fixTemplate: (snippet) => {
+      return `# FIXED: Disable container privileged mode\nsecurityContext:\n  privileged: false\n  allowPrivilegeEscalation: false\n  readOnlyRootFilesystem: true`;
+    },
+    cweId: 'CWE-250',
+    cvssScore: 9.8,
+    references: ['https://kubernetes.io/docs/concepts/security/pod-security-standards/']
+  },
+
+  'Container Running as Root User': {
+    confidence: 95,
+    explanation: 'Enforce non-root execution in Pod securityContext with runAsNonRoot: true.',
+    fixTemplate: (snippet) => {
+      return `# FIXED: Enforce non-root execution\nsecurityContext:\n  runAsNonRoot: true\n  runAsUser: 10001\n  runAsGroup: 10001`;
+    },
+    cweId: 'CWE-250',
+    cvssScore: 7.8,
+    references: ['https://kubernetes.io/docs/tasks/configure-pod-container/security-context/']
+  },
+
+  'Container Process Running as Root': {
+    confidence: 95,
+    explanation: 'Add a non-root USER instruction to Dockerfile to prevent running container processes as root.',
+    fixTemplate: (snippet) => {
+      return `# FIXED: Run as unprivileged user\nRUN groupadd -r appuser && useradd -r -g appuser appuser\nWORKDIR /app\nCOPY --chown=appuser:appuser . .\nUSER appuser\nCMD ["node", "server.js"]`;
+    },
+    cweId: 'CWE-250',
+    cvssScore: 7.5,
+    references: ['https://docs.docker.com/develop/develop-images/dockerfile_best-practices/']
+  },
+
+  'Missing Authentication Requirement on API Specification': {
+    confidence: 95,
+    explanation: 'Declare security schemes in OpenAPI components and enforce authentication on API operations.',
+    fixTemplate: (snippet) => {
+      return `# FIXED: Define security requirement in OpenAPI spec\ncomponents:\n  securitySchemes:\n    bearerAuth:\n      type: http\n      scheme: bearer\n      bearerFormat: JWT\nsecurity:\n  - bearerAuth: []`;
+    },
+    cweId: 'CWE-306',
+    cvssScore: 8.5,
+    references: ['https://swagger.io/docs/specification/authentication/']
+  },
 };
 
 // Default fallback for unknown vulnerability types
