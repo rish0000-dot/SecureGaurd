@@ -2,6 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { getAllowedOrigins } = require('../config/cors');
+const app = require('../server');
+
+test('exports the Express app for serverless deployment', () => {
+  assert.equal(typeof app, 'function');
+  assert.equal(typeof app.get, 'function');
+});
 
 test('includes the configured frontend origin and local development origins', () => {
   const origins = getAllowedOrigins({

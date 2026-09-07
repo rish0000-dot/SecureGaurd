@@ -7,6 +7,7 @@ const localOrigins = [
 
 function getAllowedOrigins(env = process.env) {
   const configuredOrigins = [env.FRONTEND_URL, ...(env.FRONTEND_URLS || '').split(',')]
+    .filter(Boolean)
     .map((origin) => origin.trim())
     .filter(Boolean)
     .filter((origin) => {
