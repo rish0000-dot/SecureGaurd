@@ -16,12 +16,14 @@ const billingWebhookRoutes = require('./routes/billingWebhook');
 const billingRoutes = require('./routes/billing');
 const sbomRoutes = require('./routes/sboms');
 const prisma = require('./prismaClient');
+const { getAllowedOrigins } = require('./config/cors');
 
 dotenv.config();
 
 const app = express();
 
-const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000'];
+const allowedOrigins = getAllowedOrigins();
+app.set('trust proxy', 1);
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -39,6 +41,10 @@ app.use('/api/billing/webhook', billingWebhookRoutes);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 // Routes
 app.use('/api/auth', authRoutes);

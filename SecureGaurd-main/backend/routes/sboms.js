@@ -2,13 +2,13 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../prismaClient');
 const authMiddleware = require('../middleware/auth');
-const { requireOrgContext, checkPermission, createAuditLog } = require('../middleware/rbac');
+const { requireOrgContext, requireOrgRole, createAuditLog } = require('../middleware/rbac');
 
 router.use(authMiddleware);
 router.use(requireOrgContext);
 
 // GET /api/sboms — list all SBOMs for active organization
-router.get('/', checkPermission('view'), async (req, res) => {
+router.get('/', requireOrgRole(['OWNER', 'ADMIN', 'DEVELOPER']), async (req, res) => {
   try {
     const sboms = await prisma.sbom.findMany({
       where: { organizationId: req.organizationId },
@@ -28,7 +28,7 @@ router.get('/', checkPermission('view'), async (req, res) => {
 });
 
 // GET /api/sboms/:id — get single SBOM details with SPDX document
-router.get('/:id', checkPermission('view'), async (req, res) => {
+router.get('/:id', requireOrgRole(['OWNER', 'ADMIN', 'DEVELOPER']), async (req, res) => {
   const sbomId = parseInt(req.params.id);
   if (isNaN(sbomId)) return res.status(400).json({ message: 'Invalid SBOM ID' });
 
@@ -62,7 +62,7 @@ router.get('/:id', checkPermission('view'), async (req, res) => {
 });
 
 // GET /api/sboms/:id/download — download valid SPDX 2.3 JSON file
-router.get('/:id/download', checkPermission('view'), async (req, res) => {
+router.get('/:id/download', requireOrgRole(['OWNER', 'ADMIN', 'DEVELOPER']), async (req, res) => {
   const sbomId = parseInt(req.params.id);
   if (isNaN(sbomId)) return res.status(400).json({ message: 'Invalid SBOM ID' });
 
@@ -95,7 +95,7 @@ router.get('/:id/download', checkPermission('view'), async (req, res) => {
 });
 
 // GET /api/repositories/:id/sbom — get latest SBOM for a repository
-router.get('/repository/:repositoryId', checkPermission('view'), async (req, res) => {
+router.get('/repository/:repositoryId', requireOrgRole(['OWNER', 'ADMIN', 'DEVELOPER']), async (req, res) => {
   const repositoryId = parseInt(req.params.repositoryId);
   if (isNaN(repositoryId)) return res.status(400).json({ message: 'Invalid repository ID' });
 

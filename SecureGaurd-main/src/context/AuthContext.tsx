@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { apiUrl } from '../config/api';
 
-const API = '/api/auth';
+const API = apiUrl('/api/auth');
 
 interface User {
   id: number;
@@ -137,13 +138,13 @@ export async function authFetch(
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
-  let res = await fetch(url, { ...options, headers, credentials: 'include' });
+  let res = await fetch(apiUrl(url), { ...options, headers, credentials: 'include' });
 
   if (res.status === 401) {
     const ok = await onRefresh();
     if (ok && newToken) {
       const fresh = newToken();
-      res = await fetch(url, {
+      res = await fetch(apiUrl(url), {
         ...options,
         headers: { ...headers, ...(fresh ? { Authorization: `Bearer ${fresh}` } : {}) },
         credentials: 'include',

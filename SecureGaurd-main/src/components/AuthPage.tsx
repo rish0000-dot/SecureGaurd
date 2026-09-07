@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Check, Loader2, Mail, ArrowRight } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { apiUrl } from '../config/api';
 import './AuthPage.css';
 
 interface AuthPageProps {
   defaultMode: 'signup' | 'login' | 'forgot';
 }
 
-const API = '/api/auth';
+const API = apiUrl('/api/auth');
 
 const AuthPage: React.FC<AuthPageProps> = ({ defaultMode }) => {
   const [mode, setMode]       = useState<'signup' | 'login' | 'forgot' | 'reset'>(defaultMode);

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import { apiUrl } from '../config/api';
 
 export interface Organization {
   id: number;
@@ -98,12 +99,12 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
         ...(targetOrgId ? { 'x-organization-id': String(targetOrgId) } : {}),
       };
 
-      let res = await fetch(url, { ...options, headers, credentials: 'include' });
+      let res = await fetch(apiUrl(url), { ...options, headers, credentials: 'include' });
 
       if (res.status === 401) {
         const ok = await refreshSession();
         if (ok) {
-          res = await fetch(url, {
+          res = await fetch(apiUrl(url), {
             ...options,
             headers: {
               ...headers,

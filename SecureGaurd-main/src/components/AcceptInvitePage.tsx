@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import { apiUrl } from '../config/api';
 import './AcceptInvitePage.css';
 
 interface Props {
@@ -23,7 +24,7 @@ export const AcceptInvitePage: React.FC<Props> = ({ token, onAccepted, onNavigat
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/invitations/${token}`);
+        const res = await fetch(apiUrl(`/api/invitations/${token}`));
         const data = await res.json();
 
         if (!res.ok) {
@@ -49,7 +50,7 @@ export const AcceptInvitePage: React.FC<Props> = ({ token, onAccepted, onNavigat
     setError(null);
 
     try {
-      const res = await fetch(`/api/invitations/${token}/accept`, {
+      const res = await fetch(apiUrl(`/api/invitations/${token}/accept`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include'

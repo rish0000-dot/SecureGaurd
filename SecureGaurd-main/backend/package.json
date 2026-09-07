@@ -4,8 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "npx tsx server.js",
-    "dev": "npx tsx --watch server.js"
+    "build": "prisma generate --schema prisma/schema.prisma",
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "keywords": [],
   "author": "",
