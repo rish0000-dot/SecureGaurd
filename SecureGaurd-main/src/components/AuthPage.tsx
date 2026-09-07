@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Check, Loader2, Mail, ArrowRight } from 'lucide-react';
+import { ArrowLeft, Check, Eye, EyeOff, Loader2, Mail, ArrowRight } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiUrl } from '../config/api';
@@ -23,8 +23,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ defaultMode }) => {
   const [lastName,  setLastName]  = useState('');
   const [email,     setEmail]     = useState('');
   const [password,  setPassword]  = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [resetToken,  setResetToken]  = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const location = useLocation();
   const navigate  = useNavigate();
@@ -192,9 +194,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ defaultMode }) => {
                   </button>
                 )}
               </div>
-              <input type="password" id="password" placeholder="••••••••" value={password}
-                onChange={e => setPassword(e.target.value)} required autoComplete="new-password"
-                minLength={8} />
+              <div className="password-input-wrap">
+                <input type={showPassword ? 'text' : 'password'} id="password" placeholder="••••••••" value={password}
+                  onChange={e => setPassword(e.target.value)} required autoComplete="new-password"
+                  minLength={8} />
+                <button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
 
             {mode === 'signup' && (
@@ -248,8 +256,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ defaultMode }) => {
             </div>
             <div className="form-group">
               <label htmlFor="new-password">New Password</label>
-              <input type="password" id="new-password" placeholder="Min 8 characters" value={newPassword}
-                onChange={e => setNewPassword(e.target.value)} required minLength={8} />
+              <div className="password-input-wrap">
+                <input type={showNewPassword ? 'text' : 'password'} id="new-password" placeholder="Min 8 characters" value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)} required minLength={8} />
+                <button type="button" className="password-toggle" onClick={() => setShowNewPassword(!showNewPassword)}
+                  aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}>
+                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
             <button type="submit" className="auth-submit-btn" disabled={loading}>
               {loading
